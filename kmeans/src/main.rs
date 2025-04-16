@@ -13,20 +13,36 @@ impl Point {
         Point { x, y }
     }
 
-    fn manhattan_distance(&self, other: &Point) -> f64 {
-        (self.x - other.x).abs() + (self.y - other.y).abs()
+    fn distance(&self, other: &Point) -> f64 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    fn add(&self, other: &Point) -> Point {
+        Point {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+
+    fn scale(&self, factor: f64) -> Point {
+        Point {
+            x: self.x * factor,
+            y: self.y * factor,
+        }
     }
 }
 
-struct KMedians {
+struct KMeans {
     k: usize,
     max_iterations: usize,
     centroids: Vec<Point>,
 }
 
-impl KMedians {
+impl KMeans {
     fn new(k: usize, max_iterations: usize) -> Self {
-        KMedians {
+        KMeans {
             k,
             max_iterations,
             centroids: Vec::new(),
@@ -52,7 +68,7 @@ impl KMedians {
                 let mut cluster = 0;
                 
                 for (i, centroid) in self.centroids.iter().enumerate() {
-                    let dist = point.manhattan_distance(centroid);
+                    let dist = point.distance(centroid);
                     if dist < min_dist {
                         min_dist = dist;
                         cluster = i;
@@ -64,51 +80,31 @@ impl KMedians {
             .collect()
     }
     
-    fn median(values: Vec<f64>) -> f64 {
-        if values.is_empty() {
-            return 0.0;
-        }
-        
-        let mut sorted_values = values;
-        sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        
-        let mid = sorted_values.len() / 2;
-        if sorted_values.len() % 2 == 0 {
-            (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
-        } else {
-            sorted_values[mid]
-        }
-    }
-    
     fn update_centroids(&mut self, data: &[Point], clusters: &[usize]) -> bool {
         let mut new_centroids = vec![Point::new(0.0, 0.0); self.k];
-        let mut changed = false;
+        let mut counts = vec![0; self.k];
+        
+        for (point, &cluster) in data.iter().zip(clusters.iter()) {
+            new_centroids[cluster] = new_centroids[cluster].add(point);
+            counts[cluster] += 1;
+        }
         
         for i in 0..self.k {
-            let mut x_values = Vec::new();
-            let mut y_values = Vec::new();
-            
-            for (point_idx, &cluster) in clusters.iter().enumerate() {
-                if cluster == i {
-                    x_values.push(data[point_idx].x);
-                    y_values.push(data[point_idx].y);
-                }
-            }
-            
-            if !x_values.is_empty() {
-                let median_x = Self::median(x_values);
-                let median_y = Self::median(y_values);
-                new_centroids[i] = Point::new(median_x, median_y);
+            if counts[i] > 0 {
+                new_centroids[i] = new_centroids[i].scale(1.0 / counts[i] as f64);
             } else {
                 new_centroids[i] = self.centroids[i];
             }
-            
-            if new_centroids[i].manhattan_distance(&self.centroids[i]) > 1e-6 {
-                changed = true;
-            }
         }
         
-        self.centroids = new_centroids;
+        let mut changed = false;
+        for i in 0..self.k {
+            if new_centroids[i].distance(&self.centroids[i]) > 1e-6 {
+                changed = true;
+            }
+            self.centroids[i] = new_centroids[i];
+        }
+        
         changed
     }
     
@@ -138,7 +134,7 @@ impl KMedians {
     fn inertia(&self, data: &[Point], clusters: &[usize]) -> f64 {
         data.iter()
             .zip(clusters.iter())
-            .map(|(point, &cluster)| point.manhattan_distance(&self.centroids[cluster]))
+            .map(|(point, &cluster)| point.distance(&self.centroids[cluster]).powi(2))
             .sum()
     }
 }
@@ -157,15 +153,13 @@ fn main() {
         Point::new(8.0, 6.0),
     ];
     
-    println!("Running K-Medians Clustering");
-    
     for k in 2..=5 {
-        println!("\nRunning k-medians with k = {}", k);
-        let mut kmedians = KMedians::new(k, 100);
-        let clusters = kmedians.fit(&data);
+        println!("\nRunning k-means with k = {}", k);
+        let mut kmeans = KMeans::new(k, 100);
+        let clusters = kmeans.fit(&data);
         
-        let inertia = kmedians.inertia(&data, &clusters);
-        println!("Sum of Manhattan distances: {:.4}", inertia);
+        let inertia = kmeans.inertia(&data, &clusters);
+        println!("Inertia (sum of squared distances): {:.4}", inertia);
         
         println!("Cluster assignments:");
         let mut cluster_map: HashMap<usize, Vec<(f64, f64)>> = HashMap::new();
